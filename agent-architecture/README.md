@@ -2,6 +2,8 @@
 
 An AI-powered assistant that generates production-ready spec files for AI agent projects. Describe your agent idea and get back structured requirements, design, and implementation task files compatible with [Kiro IDE](https://kiro.dev) and [Claude Code](https://claude.ai/claude-code).
 
+![Agent Architect UI](https://img.shields.io/badge/React-Frontend-61DAFB?logo=react&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white) ![Claude](https://img.shields.io/badge/Claude-AI-6366F1?logo=anthropic&logoColor=white)
+
 ## What It Does
 
 1. **Validates** your idea — determines if it's a script, single agent, or multi-agent system
@@ -44,6 +46,8 @@ User Request
 
 | Layer | Technology |
 |-------|-----------|
+| Frontend | React + TypeScript + Vite |
+| Styling | Cloudscape Design System |
 | API Server | FastAPI + Uvicorn |
 | LLM | Claude (Anthropic SDK) |
 | Embeddings | Voyage AI |
@@ -65,33 +69,31 @@ agent-architect/
 │   └── models.py               # Model routing (Haiku for validation, Sonnet for generation)
 ├── scripts/
 │   └── index_knowledge.py      # Index knowledge files into the vector store
-├── knowledge/
-│   ├── 01_AGENT_FUNDAMENTALS.md
-│   ├── 02_BUILD_PLAYBOOK.md
-│   ├── 03_ARCHITECTURE_PATTERNS.md
-│   ├── 04_FRAMEWORKS_GUIDE.md
-│   ├── 05_PROMPT_ENGINEERING.md
-│   ├── 06_EVAL_METHODOLOGY.md
-│   ├── 07_PRODUCTION_CHECKLIST.md
-│   ├── 08_SPEC_OUTPUT_FORMAT.md
-│   └── 09_TOOL_DESIGN.md
+├── knowledge/                  # 9 knowledge files on agent architecture
+├── frontend/                   # React + TypeScript UI
+│   ├── src/
+│   │   ├── App.tsx             # Main application component
+│   │   ├── main.tsx            # Entry point with Cloudscape styles
+│   │   └── index.css           # Custom dark theme styles
+│   ├── index.html
+│   └── package.json
 ├── requirements.txt
-├── .env.example
-└── LEARNINGS.md                # Python learnings from a JS/TS developer
+└── .env.example
 ```
 
 ## Setup
 
 ### Prerequisites
 - Python 3.9+
+- Node.js 18+
 - [Anthropic API key](https://console.anthropic.com)
 - [Voyage AI API key](https://dash.voyageai.com)
 
-### Installation
+### Backend
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/agent-architect.git
+git clone https://github.com/rafiqabshir-dev/agent-architect.git
 cd agent-architect
 
 # Create and activate virtual environment
@@ -104,35 +106,42 @@ pip install -r requirements.txt
 # Configure environment variables
 cp .env.example .env
 # Edit .env and add your API keys
-```
 
-### Index Knowledge Base
-
-Run this once to embed the knowledge files into the vector store:
-
-```bash
+# Index the knowledge base (one-time)
 python scripts/index_knowledge.py
-```
 
-### Start the Server
-
-```bash
+# Start the API server
 uvicorn app:app --reload
 ```
 
 The API will be available at `http://localhost:8000`.
 
-## Usage
-
-Send a POST request with your agent idea:
+### Frontend
 
 ```bash
-curl -X POST http://localhost:8000/generate -H "Content-Type: application/json" -d '{"query": "I want to build an AI agent that reviews pull requests, checks for bugs, and suggests improvements"}'
+# In a new terminal
+cd frontend
+npm install
+npm run dev
+```
+
+The UI will be available at `http://localhost:5173`.
+
+## Usage
+
+### Web UI
+
+Open `http://localhost:5173` in your browser, describe your agent idea, and click **Generate Specs**. The UI shows a step-by-step progress pipeline and renders the spec files with a streaming text effect across three tabs (Requirements, Design, Tasks).
+
+### API (curl)
+
+```bash
+curl -X POST http://localhost:8000/generate \
+  -H "Content-Type: application/json" \
+  -d '{"query": "I want to build an AI agent that reviews pull requests, checks for bugs, and suggests improvements"}'
 ```
 
 ### Response
-
-Returns a JSON object with three fields:
 
 ```json
 {
@@ -150,13 +159,24 @@ Returns a JSON object with three fields:
 }
 ```
 
+## Features
+
+- **Dark theme** with indigo accent colors and gradient effects
+- **Streaming text** — spec content renders with a typewriter effect
+- **Step-by-step progress** — visual pipeline showing validation, retrieval, and generation stages
+- **Tabbed output** — switch between Requirements, Design, and Tasks with animated transitions
+- **Markdown rendering** — full support for headings, tables, code blocks, and lists
+- **Responsive design** — works on desktop and mobile
+- **Input validation** — character count with warnings and guardrails
+- **Keyboard shortcut** — `Cmd+Enter` to submit
+
 ## Concepts Applied
 
 This project applies concepts from a complete AI Engineering learning path:
 
 | Concept | Lesson | Where Used |
 |---------|--------|-----------|
-| API Basics & Streaming | L1-L2 | `app.py` |
+| API Basics & Streaming | L1-L2 | `app.py`, `frontend/` |
 | System Prompts | L3 | `lib/prompts.py` |
 | Function Calling | L4 | `lib/tools.py`, `app.py` |
 | Structured Outputs | L5 | `lib/tools.py` |

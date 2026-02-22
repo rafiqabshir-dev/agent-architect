@@ -2,7 +2,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+import json
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from anthropic import Anthropic
 from pydantic import BaseModel
 from lib.prompts import system_prompt
@@ -10,6 +13,7 @@ from lib.tools import tools
 from lib.rag import get_relevant_knowledge
 from lib.guardrails import validate_input, validate_output
 from lib.models import get_model
+from lib.stream_parser import RawJsonStreamParser
 
 
 class GenerateRequest(BaseModel):
@@ -17,6 +21,12 @@ class GenerateRequest(BaseModel):
 
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 
@@ -83,3 +93,103 @@ def create_request(request: GenerateRequest):
         return {"error": f"Idea not suitable for an agent: {validation_err}"}
 
     return generate_spec(query=query, full_system_prompt=full_system_prompt)
+
+
+def format_sse(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
+
+
+@app.post("/generate-stream")
+async def create_stream_request(request: GenerateRequest):
+    query = request.query
+
+    def event_generator():
+        input_error = validate_input(query)
+        if input_error is not None:
+            yield format_sse({"type": "error", "message": input_error})
+            return
+
+        # Emit each progress step BEFORE the slow work so the user sees it right away
+        yield format_sse({"type": "progress", "step": "retrieving"})
+
+        relevant_knowledge = get_relevant_knowledge(query)
+        knowledge_text = "\n\n".join([chunk["text"] for chunk in relevant_knowledge])
+        full_system_prompt = system_prompt.replace("{context}", knowledge_text)
+
+        yield format_sse({"type": "progress", "step": "validating"})
+
+        validation_err = validate_idea(query=query, full_system_prompt=full_system_prompt)
+        if validation_err is not None:
+            yield format_sse({"type": "error", "message": f"Idea not suitable for an agent: {validation_err}"})
+            return
+
+        yield format_sse({"type": "progress", "step": "generating"})
+
+        # Phase 1: Thinking — stream Claude's reasoning about the architecture
+        try:
+            with anthropic_client.messages.stream(
+                model=get_model("generate"),
+                system=full_system_prompt,
+                max_tokens=4096,
+                messages=get_user_message(content=query),
+                thinking={"type": "enabled", "budget_tokens": 3072},
+            ) as thinking_stream:
+                for event in thinking_stream:
+                    event_type = getattr(event, "type", None)
+                    if event_type == "thinking":
+                        yield format_sse({"type": "thinking", "content": event.thinking})
+                    elif event_type == "text":
+                        yield format_sse({"type": "thinking", "content": event.text})
+        except Exception as e:
+            yield format_sse({"type": "error", "message": str(e)})
+            return
+
+        # Phase 2: Spec generation — forced tool call, token-by-token streaming
+        parser = RawJsonStreamParser()
+
+        try:
+            with anthropic_client.messages.stream(
+                model=get_model("generate"),
+                system=full_system_prompt,
+                max_tokens=8192,
+                tools=tools,
+                messages=get_user_message(content=query),
+                tool_choice={"type": "tool", "name": "generate_spec"},
+            ) as spec_stream:
+                for event in spec_stream:
+                    event_type = getattr(event, "type", None)
+                    if event_type == "input_json":
+                        deltas = parser.feed(event.partial_json)
+                        for field, content in deltas:
+                            yield format_sse({"type": "delta", "field": field, "content": content})
+
+                response = spec_stream.get_final_message()
+
+            # Validate the final output
+            tool_block = next(
+                (block for block in response.content if block.type == "tool_use" and block.name == "generate_spec"),
+                None,
+            )
+            if tool_block is None:
+                yield format_sse({"type": "error", "message": "Unexpected response from model."})
+                return
+
+            specs = tool_block.input
+            output_error = validate_output(specs)
+            if output_error is not None:
+                yield format_sse({"type": "error", "message": output_error})
+                return
+
+            yield format_sse({"type": "done"})
+
+        except Exception as e:
+            yield format_sse({"type": "error", "message": str(e)})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
